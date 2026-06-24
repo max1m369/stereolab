@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StereoLab — Профессиональный Генератор Стереограмм</title>
+    <!-- Google Fonts: Outfit for headers, Inter for UI text -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="index.css">
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-cubes-stacked logo-icon"></i>
+                <div class="logo-text">
+                    <h1>StereoLab</h1>
+                </div>
+            </div>
+            </header>
+
+        <!-- Main Layout with Tabs -->
+        <div class="main-layout">
+            <!-- Sidebar Navigation -->
+            
+
+            <!-- Content Area -->
+            
+            <!-- Sidebar Panel: containing view toggle, horizontal tabs, and tab parameters -->
+            <aside class="sidebar-control-panel">
+                <!-- View Mode Toggle -->
+                <div class="sidebar-section view-mode-section">
+                    <div class="view-mode-toggle">
+                        <span class="toggle-label"><i class="fa-solid fa-eye"></i> Взгляд:</span>
+                        <button class="toggle-btn active" id="btn-wall-eyed" title="Параллельный взгляд (стандартный для большинства стереограмм)">Параллельный</button>
+                        <button class="toggle-btn" id="btn-cross-eyed" title="Перекрестный взгляд (для скрещивания глаз)">Перекрестный</button>
+                    </div>
+                </div>
+
+                <!-- Navigation Tabs -->
+                <div class="sidebar-section navigation-section">
+                    <div class="app-tabs-nav">
+                        <button class="tab-nav-btn active" data-tab="tab-generator">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Генератор</span>
+                        </button>
+                        <button class="tab-nav-btn" data-tab="tab-editor">
+                            <i class="fa-solid fa-palette"></i> <span>Редактор карты</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Controls Container -->
+                <div class="sidebar-controls-container">
+                    <!-- Tab 1: Generator Controls -->
+                    <div class="sidebar-tab-content active" id="control-tab-generator">
+                        
+                            <h2 class="panel-title"><i class="fa-solid fa-sliders"></i> Параметры рендера</h2>
+                            
+                            <!-- Aspect Ratio -->
+                            <div class="control-group">
+                                <label class="group-label">Соотношение сторон (А4)</label>
+                                <div class="ratio-selector">
+                                    <button class="ratio-btn active" data-ratio="landscape" title="А4 Альбомная (2000x1414)">
+                                        <i class="fa-solid fa-desktop"></i>
+                                        <span>А4 Альбомная</span>
+                                    </button>
+                                    <button class="ratio-btn" data-ratio="portrait" title="А4 Книжная (1414x2000)">
+                                        <i class="fa-solid fa-mobile-screen"></i>
+                                        <span>А4 Книжная</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Resolution / DPI for Export -->
+                            <div class="control-group">
+                                <label class="group-label">Качество / Разрешение экспорта</label>
+                                <select id="select-print-dpi" class="select-control">
+                                    <option value="171" selected>Стандартное A4 (2000 px, 171 DPI)</option>
+                                    <option value="300">Для фотопечати (300 DPI — 3508 px)</option>
+                                </select>
+                            </div>
+
+
+
+                            <!-- Depth Map Source -->
+                            <div class="control-group">
+                                <label class="group-label">Карта глубины (3D форма)</label>
+                                <select id="select-depth-source" class="select-control">
+                                    <option value="editor">Из редактора карт (текущий рисунок/текст)</option>
+                                    <option value="upload">Загрузить свое изображение (Depth Map)</option>
+                                    <option value="preset-pyramid">Шаблон: Пирамида</option>
+                                    <option value="preset-sphere">Шаблон: Сфера</option>
+                                    <option value="preset-text">Шаблон: 3D Текст (Stereo)</option>
+                                </select>
+                                <div id="depth-upload-box" class="upload-box hidden">
+                                    <input type="file" id="input-depth-file" accept="image/*">
+                                    <label for="input-depth-file">
+                                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                                        <span>Выберите карту глубин (Ч/Б)</span>
+                                    </label>
+                                </div>
+                                <div id="depth-file-info" class="file-info-label hidden">
+                                    <i class="fa-solid fa-file-circle-check"></i> <span id="lbl-depth-filename">image.png</span>
+                                    <button id="btn-edit-depth-file" class="edit-btn" title="Импортировать в редактор карт глубин"><i class="fa-solid fa-pen-to-square"></i> Редактировать</button>
+                                    <button id="btn-remove-depth-file" title="Убрать файл"><i class="fa-solid fa-xmark"></i></button>
+                                </div>
+                            </div>
+
+                            <!-- Texture/Pattern Source -->
+                            <div class="control-group" id="group-texture-source">
+                                <label class="group-label">Текстура / Паттерн</label>
+                                <select id="select-texture-source" class="select-control">
+                                    <option value="preset-pattern-perlin" selected>Шаблон: Шум Перлина (Облака)</option>
+                                    <option value="preset-dots-blue-color">Цветной синий шум (Blue Noise)</option>
+                                    <option value="preset-dots-blue-mono">Монохромный синий шум</option>
+                                    <option value="upload">Загрузить свою текстуру (Color Map)</option>
+                                </select>
+                                <div id="texture-upload-box" class="upload-box hidden">
+                                    <input type="file" id="input-texture-file" accept="image/*">
+                                    <label for="input-texture-file">
+                                        <i class="fa-solid fa-image"></i>
+                                        <span>Выберите изображение текстуры</span>
+                                    </label>
+                                </div>
+                                <div id="texture-file-info" class="file-info-label hidden">
+                                    <i class="fa-solid fa-file-circle-check"></i> <span id="lbl-texture-filename">image.png</span>
+                                    <button id="btn-remove-texture-file" title="Убрать файл"><i class="fa-solid fa-xmark"></i></button>
+                                </div>
+
+                                <!-- Fog Density for Perlin Noise -->
+                                <div class="slider-control sub-control hidden" id="control-fog-density">
+                                    <div class="slider-header">
+                                        <span>Плотность тумана</span>
+                                        <span class="value-display" id="val-fog-density">30%</span>
+                                    </div>
+                                    <input type="range" id="slider-fog-density" min="0" max="100" value="30" class="range-slider">
+                                </div>
+
+                            </div>
+
+                            <!-- Render Parameters -->
+                            <div class="control-group">
+                                <label class="group-label">Настройки 3D-эффекта</label>
+                                
+                                <!-- Eye Separation (Millimeters for print calibration) -->
+                                <div class="slider-control">
+                                    <div class="slider-header">
+                                        <span>Шаг паттерна на бумаге (мм)</span>
+                                        <span class="value-display" id="val-eye-sep">52.0 мм</span>
+                                    </div>
+                                    <input type="range" id="slider-eye-sep" min="35" max="65" value="52.0" step="0.5" class="range-slider">
+                                    <p class="control-desc">Физическая ширина узора на отпечатке. Рекомендуется: 50-55 мм для комфортного слияния глаз.</p>
+                                </div>
+
+                                <!-- Max Depth Shift (Millimeters for print calibration) -->
+                                <div class="slider-control">
+                                    <div class="slider-header">
+                                        <span>Глубина 3D-рельефа (мм)</span>
+                                        <span class="value-display" id="val-max-depth">5.0 мм</span>
+                                    </div>
+                                    <input type="range" id="slider-max-depth" min="1" max="15" value="5.0" step="0.1" class="range-slider">
+                                    <p class="control-desc">Физический перепад высот 3D-объекта на отпечатке. Рекомендуется: 4-6 мм (больше = объемнее, но сложнее сфокусироваться).</p>
+                                </div>
+
+                                <!-- Main Stripe Mode Selector -->
+                                <div class="slider-control">
+                                    <div class="slider-header">
+                                        <span>Базовая полоса (Main Stripe)</span>
+                                    </div>
+                                    <div class="stripe-mode-selector">
+                                        <button type="button" class="stripe-btn active" id="btn-stripe-middle" data-mode="middle" title="Базовый узор по центру">Центральная (Middle)</button>
+                                        <button type="button" class="stripe-btn" id="btn-stripe-left" data-mode="left" title="Базовый узор слева">Левая (Left)</button>
+                                    </div>
+                                    <p class="control-desc">Определяет точку начала генерации: по центру экрана (Middle) или от левого края (Left).</p>
+                                </div>
+
+                                <!-- Smoothing -->
+                                <div class="slider-control" id="control-smoothing-pass">
+                                    <div class="slider-header">
+                                        <span>Сглаживание краев</span>
+                                        <span class="value-display" id="val-smoothing">2</span>
+                                    </div>
+                                    <input type="range" id="slider-smoothing" min="0" max="5" value="2" class="range-slider">
+                                    <p class="control-desc">Устраняет мелкий визуальный шум на резких границах глубины.</p>
+                                </div>
+
+                                <!-- Geometry Blur -->
+                                <div class="slider-control">
+                                    <div class="slider-header">
+                                        <span>Размытие геометрии (3D)</span>
+                                        <span class="value-display" id="val-geometry-blur">2 px</span>
+                                    </div>
+                                    <input type="range" id="slider-geometry-blur" min="0" max="8" value="2" class="range-slider">
+                                    <p class="control-desc">Сглаживает 3D-рельеф перед рендером, убирая резкие ступеньки.</p>
+                                </div>
+
+                                <!-- Distance to Screen (Wikipedia: V) -->
+                                <div class="slider-control">
+                                    <div class="slider-header">
+                                        <span>Дистанция до экрана (V)</span>
+                                        <span class="value-display" id="val-obs-dist">50 см</span>
+                                    </div>
+                                    <input type="range" id="slider-obs-dist" min="30" max="100" value="50" class="range-slider">
+                                    <p class="control-desc">Расстояние от глаз до экрана (Wikipedia: V).</p>
+                                </div>
+
+                                <!-- Checkbox to include dots on export has been removed -->
+
+                                <!-- Checkbox to toggle HSR -->
+                                <div class="checkbox-control-wrapper">
+                                    <label class="checkbox-control">
+                                        <input type="checkbox" id="chk-use-hsr" checked>
+                                        <span>Удаление наложений (HSR / Окклюзии)</span>
+                                    </label>
+                                </div>
+                            </div>
+                        
+                    </div>
+
+                    <!-- Tab 2: Editor Controls -->
+                    <div class="sidebar-tab-content" id="control-tab-editor">
+                        
+                            <h2 class="panel-title"><i class="fa-solid fa-palette"></i> Рисование карты</h2>
+                            
+                            <!-- Mode (Paint vs Text vs Shapes) -->
+                            <div class="toolbar-section">
+                                <div class="tool-tabs">
+                                    <button class="tool-tab-btn active" id="btn-tool-brush"><i class="fa-solid fa-brush"></i> Кисть</button>
+                                    <button class="tool-tab-btn" id="btn-tool-text"><i class="fa-solid fa-font"></i> 3D Текст</button>
+                                    <button class="tool-tab-btn" id="btn-tool-shapes"><i class="fa-solid fa-shapes"></i> Фигуры</button>
+                                </div>
+                            </div>
+
+                            <!-- BRUSH PROPERTIES -->
+                            <div class="tool-settings-panel" id="settings-brush">
+                                <div class="control-group">
+                                    <label class="group-label">Значение высоты (Глубина)</label>
+                                    <div class="depth-picker">
+                                        <div class="slider-header">
+                                            <span>Высота (Белый = близко)</span>
+                                            <span class="value-display" id="val-brush-height">255</span>
+                                        </div>
+                                        <input type="range" id="slider-brush-height" min="0" max="255" value="255" class="range-slider">
+                                        <div class="depth-presets">
+                                            <button class="depth-preset-btn color-white" data-val="255" title="Максимально близко (Белый)"></button>
+                                            <button class="depth-preset-btn color-gray-light" data-val="180" title="Близко (Светло-серый)"></button>
+                                            <button class="depth-preset-btn color-gray" data-val="120" title="Средняя глубина (Серый)"></button>
+                                            <button class="depth-preset-btn color-gray-dark" data-val="60" title="Глубоко (Темно-серый)"></button>
+                                            <button class="depth-preset-btn color-black" data-val="0" title="Самый задний план (Черный/Ластик)"></button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="control-group">
+                                    <div class="slider-control">
+                                        <div class="slider-header">
+                                            <span>Размер кисти</span>
+                                            <span class="value-display" id="val-brush-size">40 px</span>
+                                        </div>
+                                        <input type="range" id="slider-brush-size" min="5" max="150" value="40" class="range-slider">
+                                    </div>
+                                    <div class="slider-control">
+                                        <div class="slider-header">
+                                            <span>Размытие кисти (Жесткость)</span>
+                                            <span class="value-display" id="val-brush-blur">20 px</span>
+                                        </div>
+                                        <input type="range" id="slider-brush-blur" min="0" max="80" value="20" class="range-slider">
+                                        <p class="control-desc">Размытые края дают плавные переходы глубины в 3D.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- TEXT PROPERTIES -->
+                            <div class="tool-settings-panel hidden" id="settings-text">
+                                <div class="control-group">
+                                    <label class="group-label">Текст</label>
+                                    <textarea id="input-3d-text" class="text-input" rows="3" placeholder="Введите текст (макс. 6 строк)...">3D TEXT</textarea>
+                                </div>
+                                <div class="control-group">
+                                    <label class="group-label">Шрифт</label>
+                                    <select id="select-text-font" class="select-control">
+                                        <option value="Outfit">Outfit (Современный геометрический)</option>
+                                        <option value="Inter">Inter (Строгий)</option>
+                                        <option value="Impact">Impact (Жирный, плакатный)</option>
+                                        <option value="Montserrat">Montserrat (Округлый)</option>
+                                        <option value="Pacifico">Pacifico (Рукописный)</option>
+                                        <option value="Arial Black">Arial Black (Очень плотный)</option>
+                                    </select>
+                                </div>
+                                <div class="control-group">
+                                    <div class="slider-control">
+                                        <div class="slider-header">
+                                            <span>Размер шрифта</span>
+                                            <span class="value-display" id="val-text-size">120 px</span>
+                                        </div>
+                                        <input type="range" id="slider-text-size" min="30" max="250" value="120" class="range-slider">
+                                    </div>
+                                    <div class="slider-control">
+                                        <div class="slider-header">
+                                            <span>Межстрочное расстояние</span>
+                                            <span class="value-display" id="val-text-line-spacing">1.2</span>
+                                        </div>
+                                        <input type="range" id="slider-text-line-spacing" min="0.8" max="2.5" step="0.1" value="1.2" class="range-slider">
+                                    </div>
+                                    
+                                    <label class="group-label">3D Профиль текста</label>
+                                    <select id="select-text-profile" class="select-control">
+                                        <option value="flat">Плоский (Просто выдавить вперед)</option>
+                                        <option value="rounded">Округлый (Буквы объемные как купола)</option>
+                                        <option value="beveled">Скошенный (Эффект пирамидальных букв)</option>
+                                    </select>
+                                    <p class="control-desc">Округлые и скошенные профили создают восхитительный 3D-объем букв.</p>
+                                </div>
+                                <button id="btn-add-text" class="secondary-btn"><i class="fa-solid fa-plus"></i> Добавить текст</button>
+                            </div>
+
+                            <!-- SHAPES PROPERTIES -->
+                            <div class="tool-settings-panel hidden" id="settings-shapes">
+                                <div class="control-group">
+                                    <label class="group-label">Выбор 3D Фигуры</label>
+                                    <div class="shape-grid">
+                                        <button class="shape-select-btn active" data-shape="pyramid" title="Пирамида">
+                                            <i class="fa-solid fa-triangle-exclamation"></i> Пирамида
+                                        </button>
+                                        <button class="shape-select-btn" data-shape="cone" title="Конус">
+                                            <i class="fa-solid fa-circle-chevron-up"></i> Конус
+                                        </button>
+                                        <button class="shape-select-btn" data-shape="sphere" title="Сфера (Купол)">
+                                            <i class="fa-solid fa-circle"></i> Сфера
+                                        </button>
+                                        <button class="shape-select-btn" data-shape="slope" title="Наклонная плоскость">
+                                            <i class="fa-solid fa-chart-line"></i> Склон
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="control-group">
+                                    <label class="group-label">Параметры фигуры</label>
+                                    <div class="slider-control">
+                                        <div class="slider-header">
+                                            <span>Высота вершины</span>
+                                            <span class="value-display" id="val-shape-height">255</span>
+                                        </div>
+                                        <input type="range" id="slider-shape-height" min="0" max="255" value="255" class="range-slider">
+                                    </div>
+                                </div>
+                                <button id="btn-add-shape" class="secondary-btn"><i class="fa-solid fa-square-plus"></i> Нарисовать фигуру</button>
+                            </div>
+
+                            <!-- Canvas filters and actions -->
+                            <div class="editor-actions-group">
+                                <label class="group-label">Действия с холстом</label>
+                                <div class="btn-row">
+                                    <button id="btn-editor-undo" class="icon-btn" title="Отменить последнее действие"><i class="fa-solid fa-rotate-left"></i></button>
+                                    <button id="btn-editor-redo" class="icon-btn" title="Вернуть отмененное"><i class="fa-solid fa-rotate-right"></i></button>
+                                    <button id="btn-editor-blur" class="icon-btn" title="Сгладить/Размыть всю карту глубины"><i class="fa-solid fa-droplet"></i> Размыть</button>
+                                    <button id="btn-editor-invert" class="icon-btn" title="Инвертировать глубину (выпуклое станет вогнутым)"><i class="fa-solid fa-circle-half-stroke"></i> Инверт</button>
+                                </div>
+                                <button id="btn-editor-clear" class="danger-btn"><i class="fa-solid fa-trash-can"></i> Очистить холст</button>
+                            </div>
+                        
+                    </div>
+                </div>
+            </aside>
+<main class="content-area">
+                
+                <!-- TAB 1: GENERATOR -->
+                <section class="tab-content active" id="tab-generator">
+                    <div class="workbench">
+                        <!-- Controls Sidebar -->
+                        
+
+                        <!-- Canvas Workspace -->
+                        <div class="canvas-workspace">
+                            <!-- Helper Guide Dots -->
+                            <div class="guide-dots-container" id="guide-dots-wrapper">
+                                <div class="guide-dot"></div>
+                                <div class="guide-dot"></div>
+                                <span class="guide-desc">Сфокусируйте взгляд сквозь экран, пока две точки сверху не сольются в три</span>
+                            </div>
+
+                            <!-- Canvas Viewer -->
+                            <div class="canvas-display-wrapper">
+                                <div class="canvas-box">
+                                    <div class="canvas-box-header">
+                                        <div class="canvas-tabs">
+                                            <button class="canvas-tab active" id="tab-view-3d">
+                                                <i class="fa-solid fa-eye"></i> <span>Стереограмма (3D)</span>
+                                            </button>
+                                            <button class="canvas-tab" id="tab-view-depth">
+                                                <i class="fa-solid fa-image"></i> <span>Карта глубин</span>
+                                            </button>
+                                        </div>
+                                        <div class="display-mode-selector">
+                                            <button class="display-mode-btn active" id="btn-mode-adaptive" title="Адаптивный размер (вписывать в экран)"><i class="fa-solid fa-compress"></i> Адаптивный</button>
+                                            <button class="display-mode-btn" id="btn-mode-fixed" title="Фиксированный размер (во весь экран)"><i class="fa-solid fa-expand"></i> Во весь экран</button>
+                                        </div>
+                                    </div>
+                                    <div class="canvas-holder">
+                                        <canvas id="canvas-output" width="1200" height="848"></canvas>
+                                        <canvas id="canvas-output-webgl" width="1200" height="848" class="hidden"></canvas>
+                                        <canvas id="canvas-depth-view" width="1200" height="848" class="hidden"></canvas>
+                                        <div id="render-placeholder" class="canvas-placeholder">
+                                            <i class="fa-solid fa-circle-notch fa-spin"></i>
+                                            <p>Генерация стереограммы...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Bottom actions -->
+                            <div class="workspace-actions">
+                                <button id="btn-download" class="action-btn" disabled>
+                                    <i class="fa-solid fa-download"></i> Сохранить изображение
+                                </button>
+                                <button id="btn-toggle-inputs" class="action-btn">
+                                    <i class="fa-solid fa-layer-group"></i> Исходники
+                                </button>
+                            </div>
+
+                            <!-- Secondary Inputs Preview -->
+                            <div class="inputs-preview-panel hidden" id="inputs-preview-panel">
+                                <div class="preview-box">
+                                    <div class="preview-label">Карта глубин</div>
+                                    <canvas id="canvas-preview-depth" width="200" height="141"></canvas>
+                                </div>
+                                <div class="preview-box">
+                                    <div class="preview-label">Текстура</div>
+                                    <canvas id="canvas-preview-texture" width="200" height="141"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 2: DEPTH MAP EDITOR & TEXT GENERATOR -->
+                <section class="tab-content" id="tab-editor">
+                    <div class="editor-workspace">
+                        <!-- Editor Toolbar (Left) -->
+                        
+
+                        <!-- Editor Drawing Area -->
+                        <div class="editor-canvas-area">
+                            <div class="canvas-box">
+                                <div class="canvas-label">
+                                    Холст карты глубины (Черный = фон, Белый = максимальный объем)
+                                    <span class="brush-cursor-info" id="brush-info">Кисть: 40px</span>
+                                </div>
+                                <div class="canvas-holder">
+                                    <canvas id="canvas-editor" width="1200" height="848"></canvas>
+                                </div>
+                            </div>
+                            <div class="editor-quick-tips">
+                                <i class="fa-solid fa-lightbulb"></i>
+                                <span>Совет: Размытые переходы серого цвета создают плавный изгиб в 3D, а резкие Ч/Б границы создают обрывистые плоские грани.</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- Script imports -->
+    <script src="core.js"></script>
+    <script src="webgl-core.js"></script>
+    <script src="editor.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
