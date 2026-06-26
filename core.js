@@ -37,7 +37,7 @@
             const stripeRight = stripeLeft + stripeWidth;
 
             // Хелпер для извлечения глубины
-            const getDepth = (x_sub) => {
+            const getDepth = (x_sub, y) => {
                 const x_pixel = x_sub / subpixels;
                 if (x_pixel < 0 || x_pixel >= width) return 0;
                 let d = 0;
@@ -52,223 +52,270 @@
                 return viewMode === 'cross-eyed' ? 255.0 - d : d;
             };
 
-            let y = 0; // Определяем y в области видимости генератора
+            const algorithm = opts.algorithm || 'stereolab';
+            const useYShift = opts.useYShift !== false;
+            const yShift = opts.yShift || 0;
+            const useRetouch = opts.useRetouch !== false;
 
-            for (y = 0; y < height; y++) {
+            for (let y = 0; y < height; y++) {
                 const same = new Int32Array(W);
                 for (let x = 0; x < W; x++) same[x] = x;
 
                 const minSep = (eyeSep - maxDepth) * subpixels;
 
-                // 1. Построение карты связей пикселей (Center-Out)
-                // Левая часть: распространение от центра к левому краю (справа налево)
-                for (let x = stripeLeft - 1; x >= 0; x--) {
-                    const d = getDepth(x);
-                    const sep = Math.round((eyeSep - (d / 255.0) * maxDepth) * subpixels);
-                    const left = x;
-                    const right = left + sep;
-
-                    if (left >= 0 && right < W) {
-                        let visible = true;
-
-                        if (opts.useHSR !== false) {
-                            // Оптимизированный интервал проверки окклюзии (HSR)
-                            const tStart = Math.ceil(left + minSep + 1);
-                            const tEnd = Math.floor(right - 1);
-
-                            for (let t = tStart; t <= tEnd; t++) {
-                                const d_t = getDepth(t);
-                                const sep_t = Math.round((eyeSep - (d_t / 255.0) * maxDepth) * subpixels);
-                                if (t - sep_t > left) {
-                                    visible = false;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (visible) {
-                            let k = left;
-                            while (same[k] !== k && same[k] !== right) {
-                                k = same[k];
-                            }
-                            same[k] = right;
-                        } else {
-                            // Fallback to background shift to ensure texture continuity behind occlusions
-                            const bg_right = left + stripeWidth;
-                            if (bg_right < W) {
-                                let k = left;
-                                while (same[k] !== k && same[k] !== bg_right) {
-                                    k = same[k];
-                                }
-                                same[k] = bg_right;
-                            }
-                        }
-                    }
-                }
-
-                // Правая часть: распространение от центра к правому краю (слева направо)
-                for (let x = stripeRight; x < W; x++) {
-                    // 1-step corrector для определения левой границы
-                    const approx_d = getDepth(x - stripeWidth);
-                    const approx_sep = Math.round((eyeSep - (approx_d / 255.0) * maxDepth) * subpixels);
-                    
-                    const d = getDepth(x - approx_sep);
-                    const sep = Math.round((eyeSep - (d / 255.0) * maxDepth) * subpixels);
-                    const left = x - sep;
-                    const right = x;
-
-                    if (left >= 0 && right < W) {
-                        let visible = true;
-
-                        if (opts.useHSR !== false) {
-                            // Оптимизированный интервал проверки окклюзии (HSR)
-                            const tStart = Math.ceil(left + minSep + 1);
-                            const tEnd = Math.floor(right - 1);
-
-                            for (let t = tStart; t <= tEnd; t++) {
-                                const d_t = getDepth(t);
-                                const sep_t = Math.round((eyeSep - (d_t / 255.0) * maxDepth) * subpixels);
-                                if (t - sep_t > left) {
-                                    visible = false;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (visible) {
-                            let k = right;
-                            while (same[k] !== k && same[k] !== left) {
-                                k = same[k];
-                            }
-                            same[k] = left;
-                        } else {
-                            // Fallback to background shift to ensure texture continuity behind occlusions
-                            const bg_left = right - stripeWidth;
-                            if (bg_left >= 0) {
-                                let k = right;
-                                while (same[k] !== k && same[k] !== bg_left) {
-                                    k = same[k];
-                                }
-                                same[k] = bg_left;
-                            }
-                        }
-                    }
-                }
-
-                // 2. Разрешение цветов и субпиксельное сглаживание
-                if (type === 'mask') {
-                    const classSizes = new Int32Array(W);
+                if (algorithm === 'steer') {
+                    // --- 1. АЛГОРИТМ ЭНДРЮ СТИРА (Связи и HSR) ---
+                    const lookL = new Int32Array(W);
+                    const lookR = new Int32Array(W);
                     for (let x = 0; x < W; x++) {
-                        let root = x;
-                        while (same[root] !== root) root = same[root];
-                        classSizes[root]++;
+                        lookL[x] = x;
+                        lookR[x] = x;
                     }
-                    for (let px = 0; px < width; px++) {
-                        const startSub = px * subpixels;
-                        let maxClassSize = 0;
-                        for (let n = 0; n < subpixels; n++) {
-                            let root = startSub + n;
+
+                    for (let x = 0; x < W; x++) {
+                        const d = getDepth(x, y);
+                        const sep = Math.round((eyeSep - (d / 255.0) * maxDepth) * subpixels);
+                        const left = x - Math.floor(sep / 2);
+                        const right = left + sep;
+                        let vis = true;
+
+                        if (left >= 0 && right < W) {
+                            if (opts.useHSR !== false) {
+                                if (lookL[right] !== right) {
+                                    if (lookL[right] < left) {
+                                        lookR[lookL[right]] = lookL[right];
+                                        lookL[right] = right;
+                                    } else {
+                                        vis = false;
+                                    }
+                                }
+                                if (lookR[left] !== left) {
+                                    if (lookR[left] > right) {
+                                        lookL[lookR[left]] = lookR[left];
+                                        lookR[left] = left;
+                                    } else {
+                                        vis = false;
+                                    }
+                                }
+                            }
+                            if (vis) {
+                                lookL[right] = left;
+                                lookR[left] = right;
+                            }
+                        }
+                    }
+
+                    if (type === 'mask') {
+                        for (let x = 0; x < W; x++) {
+                            if (lookL[x] !== x) {
+                                let r1 = x; while (same[r1] !== r1) r1 = same[r1];
+                                let r2 = lookL[x]; while (same[r2] !== r2) r2 = same[r2];
+                                if (r1 !== r2) same[r1] = r2;
+                            }
+                            if (lookR[x] !== x) {
+                                let r1 = x; while (same[r1] !== r1) r1 = same[r1];
+                                let r2 = lookR[x]; while (same[r2] !== r2) r2 = same[r2];
+                                if (r1 !== r2) same[r1] = r2;
+                            }
+                        }
+                        const classSizes = new Int32Array(W);
+                        for (let x = 0; x < W; x++) {
+                            let root = x;
                             while (same[root] !== root) root = same[root];
-                            if (classSizes[root] > maxClassSize) {
-                                maxClassSize = classSizes[root];
+                            classSizes[root]++;
+                        }
+                        for (let px = 0; px < width; px++) {
+                            const startSub = px * subpixels;
+                            let maxClassSize = 0;
+                            for (let n = 0; n < subpixels; n++) {
+                                let root = startSub + n;
+                                while (same[root] !== root) root = same[root];
+                                if (classSizes[root] > maxClassSize) maxClassSize = classSizes[root];
                             }
+                            const colorVal = (maxClassSize > subpixels) ? 255 : 0;
+                            const outIdx = (y * width + px) * 4;
+                            pixels[outIdx] = pixels[outIdx+1] = pixels[outIdx+2] = colorVal;
+                            pixels[outIdx + 3] = 255;
                         }
-                        const colorVal = (maxClassSize > subpixels) ? 255 : 0;
-                        const outIdx = (y * width + px) * 4;
-                        pixels[outIdx] = colorVal;
-                        pixels[outIdx + 1] = colorVal;
-                        pixels[outIdx + 2] = colorVal;
-                        pixels[outIdx + 3] = 255;
-                    }
-                } else {
-                    const rowColors = new Uint8ClampedArray(W * 3);
-                    const resolvedColor = new Map();
+                    } else {
+                        const rowColors = new Uint8ClampedArray(W * 3);
+                        const vmaxsep = stripeWidth;
+                        const s = stripeLeft;
+                        const poffset = vmaxsep - (s % vmaxsep);
 
-                    for (let x = 0; x < W; x++) {
-                        let root = x;
-                        while (same[root] !== root) {
-                            root = same[root];
-                        }
-
-                        if (!resolvedColor.has(root)) {
+                        const getPatternColor = (xCoord, yCoord) => {
                             let r = 0, g = 0, b = 0;
-
                             if (type === 'rds') {
                                 if (colorsPalette && colorsPalette.length > 0) {
                                     const c = colorsPalette[Math.floor(Math.random() * colorsPalette.length)];
-                                    r = c[0];
-                                    g = c[1];
-                                    b = c[2];
+                                    r = c[0]; g = c[1]; b = c[2];
                                 } else {
-                                    r = Math.floor(Math.random() * 256);
-                                    g = Math.floor(Math.random() * 256);
-                                    b = Math.floor(Math.random() * 256);
+                                    r = Math.floor(Math.random() * 256); g = Math.floor(Math.random() * 256); b = Math.floor(Math.random() * 256);
                                 }
-                            } else { // 'mts'
+                            } else {
                                 if (textureData) {
-                                    // Сдвигаем координату сэмплирования паттерна на величину stripeLeft для точной синхронизации
-                                    const pixelX = (root - stripeLeft) / subpixels;
-                                    const tx = ((pixelX % texW) + texW) % texW;
-                                    const ty = y % texH;
-                                    
-                                    const tx0 = Math.floor(tx);
-                                    const tx1 = (tx0 + 1) % texW;
-                                    const ty0 = Math.floor(ty);
-                                    const ty1 = (ty0 + 1) % texH;
-                                    
-                                    const kx = tx - tx0;
-                                    const ky = ty - ty0;
-                                    
-                                    const idx00 = (ty0 * texW + tx0) * 4;
-                                    const idx10 = (ty0 * texW + tx1) * 4;
-                                    const idx01 = (ty1 * texW + tx0) * 4;
-                                    const idx11 = (ty1 * texW + tx1) * 4;
-                                    
-                                    const r0 = texData[idx00] * (1 - kx) + texData[idx10] * kx;
-                                    const r1 = texData[idx01] * (1 - kx) + texData[idx11] * kx;
-                                    r = r0 * (1 - ky) + r1 * ky;
-                                    
-                                    const g0 = texData[idx00 + 1] * (1 - kx) + texData[idx10 + 1] * kx;
-                                    const g1 = texData[idx01 + 1] * (1 - kx) + texData[idx11 + 1] * kx;
-                                    g = g0 * (1 - ky) + g1 * ky;
-                                    
-                                    const b0 = texData[idx00 + 2] * (1 - kx) + texData[idx10 + 2] * kx;
-                                    const b1 = texData[idx01 + 2] * (1 - kx) + texData[idx11 + 2] * kx;
-                                    b = b0 * (1 - ky) + b1 * ky;
+                                    const tx = ((xCoord % texW) + texW) % texW;
+                                    const ty = ((yCoord % texH) + texH) % texH;
+                                    const tx0 = Math.floor(tx); const tx1 = (tx0 + 1) % texW;
+                                    const ty0 = Math.floor(ty); const ty1 = (ty0 + 1) % texH;
+                                    const kx = tx - tx0; const ky = ty - ty0;
+                                    const idx00 = (ty0 * texW + tx0) * 4; const idx10 = (ty0 * texW + tx1) * 4;
+                                    const idx01 = (ty1 * texW + tx0) * 4; const idx11 = (ty1 * texW + tx1) * 4;
+                                    r = (texData[idx00] * (1 - kx) + texData[idx10] * kx) * (1 - ky) + (texData[idx01] * (1 - kx) + texData[idx11] * kx) * ky;
+                                    g = (texData[idx00 + 1] * (1 - kx) + texData[idx10 + 1] * kx) * (1 - ky) + (texData[idx01 + 1] * (1 - kx) + texData[idx11 + 1] * kx) * ky;
+                                    b = (texData[idx00 + 2] * (1 - kx) + texData[idx10 + 2] * kx) * (1 - ky) + (texData[idx01 + 2] * (1 - kx) + texData[idx11 + 2] * kx) * ky;
                                 } else {
-                                    const pixelX = Math.floor((root - stripeLeft) / subpixels);
-                                    const colorVal = (((pixelX % 60) + 60) % 60 < 30) ? 200 : 50;
-                                    r = colorVal;
-                                    g = 100;
-                                    b = 150;
+                                    const colorVal = (((Math.floor(xCoord) % 60) + 60) % 60 < 30) ? 200 : 50;
+                                    r = colorVal; g = 100; b = 150;
                                 }
                             }
+                            return [r, g, b];
+                        };
 
-                            resolvedColor.set(root, [r, g, b]);
+                        for (let x = s; x < W; x++) {
+                            if (lookL[x] === x || lookL[x] < s) {
+                                if (useRetouch && x > s && lookL[x] === x && lookL[x-1] !== x-1) {
+                                    rowColors[x*3] = rowColors[(x-1)*3]; rowColors[x*3+1] = rowColors[(x-1)*3+1]; rowColors[x*3+2] = rowColors[(x-1)*3+2];
+                                } else {
+                                    const repeatIndex = Math.floor((x - s) / vmaxsep);
+                                    const col = getPatternColor(((x - s) % vmaxsep) / subpixels, y + (useYShift ? repeatIndex * yShift : 0));
+                                    rowColors[x*3] = col[0]; rowColors[x*3+1] = col[1]; rowColors[x*3+2] = col[2];
+                                }
+                            } else {
+                                const l = lookL[x]; rowColors[x*3] = rowColors[l*3]; rowColors[x*3+1] = rowColors[l*3+1]; rowColors[x*3+2] = rowColors[l*3+2];
+                            }
                         }
-
-                        const col = resolvedColor.get(root);
-                        const idx = x * 3;
-                        rowColors[idx] = col[0];
-                        rowColors[idx + 1] = col[1];
-                        rowColors[idx + 2] = col[2];
+                        for (let x = s - 1; x >= 0; x--) {
+                            if (lookR[x] === x) {
+                                if (useRetouch && x < s - 1 && lookR[x] === x && lookR[x+1] !== x+1) {
+                                    rowColors[x*3] = rowColors[(x+1)*3]; rowColors[x*3+1] = rowColors[(x+1)*3+1]; rowColors[x*3+2] = rowColors[(x+1)*3+2];
+                                } else {
+                                    const repeatIndex = Math.floor((s - x - 1) / vmaxsep) + 1;
+                                    const col = getPatternColor(((x - s) % vmaxsep) / subpixels, y + (useYShift ? repeatIndex * yShift : 0));
+                                    rowColors[x*3] = col[0]; rowColors[x*3+1] = col[1]; rowColors[x*3+2] = col[2];
+                                }
+                            } else {
+                                const r = lookR[x]; rowColors[x*3] = rowColors[r*3]; rowColors[x*3+1] = rowColors[r*3+1]; rowColors[x*3+2] = rowColors[r*3+2];
+                            }
+                        }
+                        for (let px = 0; px < width; px++) {
+                            let sR = 0, sG = 0, sB = 0;
+                            for (let n = 0; n < subpixels; n++) {
+                                const idx = (px * subpixels + n) * 3;
+                                sR += rowColors[idx]; sG += rowColors[idx+1]; sB += rowColors[idx+2];
+                            }
+                            const outIdx = (y * width + px) * 4;
+                            pixels[outIdx] = sR / subpixels; pixels[outIdx+1] = sG / subpixels; pixels[outIdx+2] = sB / subpixels; pixels[outIdx+3] = 255;
+                        }
                     }
-
-                    // Даунсэмплинг для антиалиасинга
-                    for (let px = 0; px < width; px++) {
-                        let sumR = 0, sumG = 0, sumB = 0;
-                        const startSub = px * subpixels;
-                        for (let n = 0; n < subpixels; n++) {
-                            const idx = (startSub + n) * 3;
-                            sumR += rowColors[idx];
-                            sumG += rowColors[idx + 1];
-                            sumB += rowColors[idx + 2];
+                } else {
+                    // --- 2. АЛГОРИТМ STEREOLAB DSU ---
+                    for (let x = 0; x < W; x++) {
+                        const d = getDepth(x, y);
+                        const sep = Math.round((eyeSep - (d / 255.0) * maxDepth) * subpixels);
+                        const left = x - sep;
+                        if (left >= 0) {
+                            let k = x; while (same[k] !== k && same[k] !== left) k = same[k];
+                            same[k] = left;
                         }
-                        const outIdx = (y * width + px) * 4;
-                        pixels[outIdx] = Math.round(sumR / subpixels);
-                        pixels[outIdx + 1] = Math.round(sumG / subpixels);
-                        pixels[outIdx + 2] = Math.round(sumB / subpixels);
-                        pixels[outIdx + 3] = 255;
+                    }
+                    if (type === 'mask') {
+                        const classSizes = new Int32Array(W);
+                        for (let x = 0; x < W; x++) {
+                            let root = x;
+                            while (same[root] !== root) root = same[root];
+                            classSizes[root]++;
+                        }
+                        for (let px = 0; px < width; px++) {
+                            const startSub = px * subpixels;
+                            let maxClassSize = 0;
+                            for (let n = 0; n < subpixels; n++) {
+                                let root = startSub + n;
+                                while (same[root] !== root) root = same[root];
+                                if (classSizes[root] > maxClassSize) maxClassSize = classSizes[root];
+                            }
+                            const colorVal = (maxClassSize > subpixels) ? 255 : 0;
+                            const outIdx = (y * width + px) * 4;
+                            pixels[outIdx] = pixels[outIdx+1] = pixels[outIdx+2] = colorVal;
+                            pixels[outIdx+3] = 255;
+                        }
+                    } else {
+                        const rowColors = new Uint8ClampedArray(W * 3);
+                        const resolvedColor = new Map();
+
+                        for (let x = 0; x < W; x++) {
+                            let root = x;
+                            while (same[root] !== root) {
+                                root = same[root];
+                            }
+
+                            if (!resolvedColor.has(root)) {
+                                let r = 0, g = 0, b = 0;
+
+                                if (type === 'rds') {
+                                    if (colorsPalette && colorsPalette.length > 0) {
+                                        const c = colorsPalette[Math.floor(Math.random() * colorsPalette.length)];
+                                        r = c[0]; g = c[1]; b = c[2];
+                                    } else {
+                                        r = Math.floor(Math.random() * 256); g = Math.floor(Math.random() * 256); b = Math.floor(Math.random() * 256);
+                                    }
+                                } else { // 'mts'
+                                    if (textureData) {
+                                        const pixelX = (root - stripeLeft) / subpixels;
+                                        const tx = ((pixelX % texW) + texW) % texW;
+                                        const repeatIndex = Math.floor((root - stripeLeft) / stripeWidth);
+                                        const shiftedY = y + (useYShift ? repeatIndex * yShift : 0);
+                                        const ty = ((shiftedY % texH) + texH) % texH;
+
+                                        const tx0 = Math.floor(tx);
+                                        const tx1 = (tx0 + 1) % texW;
+                                        const ty0 = Math.floor(ty);
+                                        const ty1 = (ty0 + 1) % texH;
+
+                                        const kx = tx - tx0;
+                                        const ky = ty - ty0;
+
+                                        const idx00 = (ty0 * texW + tx0) * 4;
+                                        const idx10 = (ty0 * texW + tx1) * 4;
+                                        const idx01 = (ty1 * texW + tx0) * 4;
+                                        const idx11 = (ty1 * texW + tx1) * 4;
+
+                                        r = (texData[idx00] * (1 - kx) + texData[idx10] * kx) * (1 - ky) + (texData[idx01] * (1 - kx) + texData[idx11] * kx) * ky;
+                                        g = (texData[idx00 + 1] * (1 - kx) + texData[idx10 + 1] * kx) * (1 - ky) + (texData[idx01 + 1] * (1 - kx) + texData[idx11 + 1] * kx) * ky;
+                                        b = (texData[idx00 + 2] * (1 - kx) + texData[idx10 + 2] * kx) * (1 - ky) + (texData[idx01 + 2] * (1 - kx) + texData[idx11 + 2] * kx) * ky;
+                                    } else {
+                                        const pixelX = Math.floor((root - stripeLeft) / subpixels);
+                                        const colorVal = (((pixelX % 60) + 60) % 60 < 30) ? 200 : 50;
+                                        r = colorVal; g = 100; b = 150;
+                                    }
+                                }
+
+                                resolvedColor.set(root, [r, g, b]);
+                            }
+
+                            const col = resolvedColor.get(root);
+                            const idx = x * 3;
+                            rowColors[idx] = col[0];
+                            rowColors[idx + 1] = col[1];
+                            rowColors[idx + 2] = col[2];
+                        }
+
+                        // Даунсэмплинг для антиалиасинга
+                        for (let px = 0; px < width; px++) {
+                            let sumR = 0, sumG = 0, sumB = 0;
+                            const startSub = px * subpixels;
+                            for (let n = 0; n < subpixels; n++) {
+                                const idx = (startSub + n) * 3;
+                                sumR += rowColors[idx];
+                                sumG += rowColors[idx + 1];
+                                sumB += rowColors[idx + 2];
+                            }
+                            const outIdx = (y * width + px) * 4;
+                            pixels[outIdx] = Math.round(sumR / subpixels);
+                            pixels[outIdx + 1] = Math.round(sumG / subpixels);
+                            pixels[outIdx + 2] = Math.round(sumB / subpixels);
+                            pixels[outIdx + 3] = 255;
+                        }
                     }
                 }
             }

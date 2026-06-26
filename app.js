@@ -53,32 +53,32 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Взгляд: Параллельный / Перекрестный
-    let viewMode = 'wall-eyed';
-    const btnWallEyed = document.getElementById('btn-wall-eyed');
-    const btnCrossEyed = document.getElementById('btn-cross-eyed');
+    // Взгляд: всегда Параллельный
+    const viewMode = 'wall-eyed';
 
-    btnWallEyed.addEventListener('click', () => {
-        viewMode = 'wall-eyed';
-        btnWallEyed.classList.add('active');
-        btnCrossEyed.classList.remove('active');
-        triggerAutoRender(0);
-    });
+    // Режим полос (Stripe Mode)
+    let stripesMode = 'adaptive'; // 'adaptive' | 'fixed'
+    let stripesCount = 10;
 
-    btnCrossEyed.addEventListener('click', () => {
-        viewMode = 'cross-eyed';
-        btnCrossEyed.classList.add('active');
-        btnWallEyed.classList.remove('active');
-        triggerAutoRender(0);
-    });
+    function getEyeSepPixels(w) {
+        if (stripesMode === 'fixed') {
+            return Math.round(w / (stripesCount + 1));
+        } else {
+            const physicalWidth = aspectRatio === 'landscape' ? 297 : 210;
+            const scale = w / physicalWidth;
+            return Math.round(parseFloat(sliderEyeSep.value) * scale);
+        }
+    }
 
     // -------------------------------------------------------------
     // 3. ИНИЦИАЛИЗАЦИЯ РЕДАКТОРА КАРТЫ ГЛУБИНЫ
     // -------------------------------------------------------------
     const depthEditor = new DepthEditor('canvas-editor');
 
-    // Кнопки инструментов (Кисть, Текст, Фигуры)
+    // Кнопки инструментов (Кисть, Ластик, Пипетка, Текст, Фигуры)
     const btnToolBrush = document.getElementById('btn-tool-brush');
+    const btnToolEraser = document.getElementById('btn-tool-eraser');
+    const btnToolEyedropper = document.getElementById('btn-tool-eyedropper');
     const btnToolText = document.getElementById('btn-tool-text');
     const btnToolShapes = document.getElementById('btn-tool-shapes');
     
@@ -88,31 +88,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const switchTool = (toolName) => {
         depthEditor.currentTool = toolName;
+        depthEditor.isEraserMode = (toolName === 'eraser');
         
-        // Переключаем активную вкладку панели
-        btnToolBrush.classList.remove('active');
-        btnToolText.classList.remove('active');
-        btnToolShapes.classList.remove('active');
+        // Смена активного класса на кнопках инструментов
+        if (btnToolBrush) btnToolBrush.classList.remove('active');
+        if (btnToolEraser) btnToolEraser.classList.remove('active');
+        if (btnToolEyedropper) btnToolEyedropper.classList.remove('active');
+        if (btnToolText) btnToolText.classList.remove('active');
+        if (btnToolShapes) btnToolShapes.classList.remove('active');
         
         settingsBrush.classList.add('hidden');
         settingsText.classList.add('hidden');
         settingsShapes.classList.add('hidden');
 
-        if (toolName === 'brush') {
-            btnToolBrush.classList.add('active');
+        if (toolName === 'brush' || toolName === 'eraser') {
+            const activeBtn = toolName === 'brush' ? btnToolBrush : btnToolEraser;
+            if (activeBtn) activeBtn.classList.add('active');
             settingsBrush.classList.remove('hidden');
+        } else if (toolName === 'eyedropper') {
+            if (btnToolEyedropper) btnToolEyedropper.classList.add('active');
+            settingsBrush.classList.remove('hidden'); // показываем настройки, чтобы видеть текущую высоту
         } else if (toolName === 'text') {
-            btnToolText.classList.add('active');
+            if (btnToolText) btnToolText.classList.add('active');
             settingsText.classList.remove('hidden');
         } else if (toolName === 'shapes') {
-            btnToolShapes.classList.add('active');
+            if (btnToolShapes) btnToolShapes.classList.add('active');
             settingsShapes.classList.remove('hidden');
         }
+        
+        updateBrushDisplay();
     };
 
-    btnToolBrush.addEventListener('click', () => switchTool('brush'));
-    btnToolText.addEventListener('click', () => switchTool('text'));
-    btnToolShapes.addEventListener('click', () => switchTool('shapes'));
+    if (btnToolBrush) btnToolBrush.addEventListener('click', () => switchTool('brush'));
+    if (btnToolEraser) btnToolEraser.addEventListener('click', () => switchTool('eraser'));
+    if (btnToolEyedropper) btnToolEyedropper.addEventListener('click', () => switchTool('eyedropper'));
+    if (btnToolText) btnToolText.addEventListener('click', () => switchTool('text'));
+    if (btnToolShapes) btnToolShapes.addEventListener('click', () => switchTool('shapes'));
 
     // Настройки кисти
     const sliderBrushHeight = document.getElementById('slider-brush-height');
@@ -128,7 +139,15 @@ document.addEventListener('DOMContentLoaded', () => {
         valBrushHeight.textContent = sliderBrushHeight.value;
         valBrushSize.textContent = sliderBrushSize.value + ' px';
         valBrushBlur.textContent = sliderBrushBlur.value + ' px';
-        brushInfo.textContent = `Кисть: ${sliderBrushSize.value}px (Размытие: ${sliderBrushBlur.value}px, Глубина: ${sliderBrushHeight.value})`;
+        
+        let toolText = 'Кисть';
+        if (depthEditor.isEraserMode) {
+            toolText = 'Ластик';
+        } else if (depthEditor.currentTool === 'eyedropper') {
+            toolText = 'Пипетка';
+        }
+        
+        brushInfo.textContent = `${toolText}: ${sliderBrushSize.value}px (Размытие: ${sliderBrushBlur.value}px, Глубина: ${sliderBrushHeight.value})`;
         
         depthEditor.brushHeight = parseInt(sliderBrushHeight.value);
         depthEditor.brushSize = parseInt(sliderBrushSize.value);
@@ -147,6 +166,52 @@ document.addEventListener('DOMContentLoaded', () => {
             updateBrushDisplay();
         });
     });
+
+    // Форма кисти (Круг, Квадрат, Ромб)
+    const brushShapeButtons = document.querySelectorAll('[data-brush-shape]');
+    brushShapeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            brushShapeButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            depthEditor.brushShape = btn.getAttribute('data-brush-shape');
+            updateBrushDisplay();
+        });
+    });
+
+    // Профиль кисти (Plane, Sphere, Inset)
+    const brushProfileButtons = document.querySelectorAll('[data-brush-profile]');
+    brushProfileButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            brushProfileButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            depthEditor.brushProfile = btn.getAttribute('data-brush-profile');
+            updateBrushDisplay();
+        });
+    });
+
+    // Настройки наклона/инкремента
+    const chkBrushSlopeEnabled = document.getElementById('chk-brush-slope-enabled');
+    const controlBrushSlopeStep = document.getElementById('control-brush-slope-step');
+    const sliderBrushSlopeStep = document.getElementById('slider-brush-slope-step');
+    const valBrushSlopeStep = document.getElementById('val-brush-slope-step');
+
+    if (chkBrushSlopeEnabled && controlBrushSlopeStep && sliderBrushSlopeStep && valBrushSlopeStep) {
+        chkBrushSlopeEnabled.addEventListener('change', () => {
+            const enabled = chkBrushSlopeEnabled.checked;
+            depthEditor.depthIncrementEnabled = enabled;
+            if (enabled) {
+                controlBrushSlopeStep.classList.remove('hidden');
+            } else {
+                controlBrushSlopeStep.classList.add('hidden');
+            }
+        });
+
+        sliderBrushSlopeStep.addEventListener('input', () => {
+            const stepVal = parseFloat(sliderBrushSlopeStep.value);
+            depthEditor.depthIncrementValue = stepVal;
+            valBrushSlopeStep.textContent = (stepVal > 0 ? '+' : '') + stepVal.toFixed(1);
+        });
+    }
 
     // Авто-рендер при завершении рисования кистью
     const canvasEditor = document.getElementById('canvas-editor');
@@ -351,53 +416,83 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
             aspectRatio = btn.getAttribute('data-ratio');
             
-            changeAspectRatio(aspectRatio);
+            syncCanvasResolution();
         });
     });
 
-    function changeAspectRatio(ratio) {
-        const prevWidth = canvasOutput.width;
-        const prevHeight = canvasOutput.height;
+    function syncCanvasResolution(isInit = false) {
+        const selectPrintDpi = document.getElementById('select-print-dpi');
+        const printDPI = selectPrintDpi ? parseInt(selectPrintDpi.value) : 171;
+        let outWidth = 2000;
+        let outHeight = 1414;
         
-        let newWidth = 1200;
-        let newHeight = 848;
-        if (ratio === 'portrait') {
-            newWidth = 848;
-            newHeight = 1200;
+        if (aspectRatio === 'portrait') {
+            if (printDPI === 300) {
+                outWidth = 2480;
+                outHeight = 3508;
+            } else {
+                outWidth = 1414;
+                outHeight = 2000;
+            }
+        } else {
+            if (printDPI === 300) {
+                outWidth = 3508;
+                outHeight = 2480;
+            } else {
+                outWidth = 2000;
+                outHeight = 1414;
+            }
         }
-        
-        if (prevWidth === newWidth && prevHeight === newHeight) return;
-        
-        // Сохраняем текущее содержимое редактора карт глубин, чтобы масштабировать
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = prevWidth;
-        tempCanvas.height = prevHeight;
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(depthEditor.canvas, 0, 0);
-        
-        // Меняем ширину и высоту
-        depthEditor.canvas.width = newWidth;
-        depthEditor.canvas.height = newHeight;
-        canvasOutput.width = newWidth;
-        canvasOutput.height = newHeight;
+
+        // Фиксированное оптимизированное разрешение для холста редактора, чтобы кисть работала плавно без лагов
+        let editorWidth = aspectRatio === 'portrait' ? 1414 : 2000;
+        let editorHeight = aspectRatio === 'portrait' ? 2000 : 1414;
+
+        const prevOutWidth = canvasOutput.width;
+        const prevOutHeight = canvasOutput.height;
+
+        if (!isInit && prevOutWidth === outWidth && prevOutHeight === outHeight) return;
+
+        let tempCanvas = null;
+        if (!isInit && depthEditor && depthEditor.canvas) {
+            tempCanvas = document.createElement('canvas');
+            tempCanvas.width = depthEditor.canvas.width;
+            tempCanvas.height = depthEditor.canvas.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(depthEditor.canvas, 0, 0);
+        }
+
+        canvasOutput.width = outWidth;
+        canvasOutput.height = outHeight;
         if (canvasOutputWebGL) {
-            canvasOutputWebGL.width = newWidth;
-            canvasOutputWebGL.height = newHeight;
+            canvasOutputWebGL.width = outWidth;
+            canvasOutputWebGL.height = outHeight;
         }
         if (canvasDepthView) {
-            canvasDepthView.width = newWidth;
-            canvasDepthView.height = newHeight;
+            canvasDepthView.width = outWidth;
+            canvasDepthView.height = outHeight;
         }
-        
-        // Отрисовываем растянутую карту глубины обратно в редактор
-        depthEditor.ctx.fillStyle = '#000000';
-        depthEditor.ctx.fillRect(0, 0, newWidth, newHeight);
-        depthEditor.ctx.drawImage(tempCanvas, 0, 0, prevWidth, prevHeight, 0, 0, newWidth, newHeight);
-        
-        // Сохраняем новое состояние в стек Undo
-        depthEditor.saveState();
-        
-        // Обновляем превью и рендерим
+        if (depthEditor && depthEditor.canvas) {
+            const prevEditorW = depthEditor.canvas.width;
+            const prevEditorH = depthEditor.canvas.height;
+            
+            depthEditor.canvas.width = editorWidth;
+            depthEditor.canvas.height = editorHeight;
+            
+            if (tempCanvas) {
+                depthEditor.ctx.fillStyle = '#000000';
+                depthEditor.ctx.fillRect(0, 0, editorWidth, editorHeight);
+                depthEditor.ctx.drawImage(tempCanvas, 0, 0, prevEditorW, prevEditorH, 0, 0, editorWidth, editorHeight);
+                depthEditor.saveState();
+            } else {
+                depthEditor.clearCanvas();
+                depthEditor.saveState();
+            }
+        }
+
+        if (typeof updateRenderParamsDisplay === 'function') {
+            updateRenderParamsDisplay();
+        }
         updateInputsPreview();
         triggerAutoRender(0);
     }
@@ -595,22 +690,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const valGeometryBlur = document.getElementById('val-geometry-blur');
     const guideDotsWrapper = document.getElementById('guide-dots-wrapper');
 
+    // Режим полос (Stripe Mode) DOM элементы
+    const btnStripesAdaptive = document.getElementById('btn-stripes-adaptive');
+    const btnStripesFixed = document.getElementById('btn-stripes-fixed');
+    const controlEyeSep = document.getElementById('control-eye-sep');
+    const controlStripesCount = document.getElementById('control-stripes-count');
+    const sliderStripesCount = document.getElementById('slider-stripes-count');
+    const valStripesCount = document.getElementById('val-stripes-count');
+
     const updateRenderParamsDisplay = () => {
-        const pStep = parseFloat(sliderEyeSep.value);
-        const pDepth = parseFloat(sliderMaxDepth.value);
-        
-        // Расчет пикселей для превью (на основе 1200px ширины для А4)
+        // Расчет пикселей для превью (на основе ширины холста)
         const previewW = canvasOutput.width;
         const physicalWidth = aspectRatio === 'landscape' ? 297 : 210;
         const previewScale = previewW / physicalWidth;
         
-        const previewEyeSep = Math.round(pStep * previewScale);
+        let previewEyeSep;
+        let pStep;
+        if (stripesMode === 'fixed') {
+            previewEyeSep = Math.round(previewW / (stripesCount + 1));
+            pStep = previewEyeSep / previewScale;
+        } else {
+            pStep = parseFloat(sliderEyeSep.value);
+            previewEyeSep = Math.round(pStep * previewScale);
+        }
+
+        const pDepth = parseFloat(sliderMaxDepth.value);
         const previewMaxDepth = Math.round(pDepth * previewScale);
         const previewMaxDepthPercent = Math.round((pDepth / pStep) * 100);
 
         valEyeSep.textContent = pStep.toFixed(1) + ' мм (~' + previewEyeSep + ' px на экране)';
         valMaxDepth.textContent = pDepth.toFixed(1) + ' мм (~' + previewMaxDepth + ' px / ' + previewMaxDepthPercent + '%)';
         
+        if (valStripesCount && sliderStripesCount) {
+            valStripesCount.textContent = stripesCount + ' (~' + previewEyeSep + ' px / полоса)';
+        }
+
         valSmoothing.textContent = sliderSmoothing.value;
         if (valObsDist && sliderObsDist) {
             valObsDist.textContent = sliderObsDist.value + ' см';
@@ -651,7 +765,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sliderEyeSep.addEventListener('input', () => { updateRenderParamsDisplay(); triggerAutoRender(150); });
     sliderMaxDepth.addEventListener('input', () => { updateRenderParamsDisplay(); triggerAutoRender(150); });
     if (selectPrintDpi) {
-        selectPrintDpi.addEventListener('change', () => { updateRenderParamsDisplay(); triggerAutoRender(0); });
+        selectPrintDpi.addEventListener('change', () => { syncCanvasResolution(); });
     }
     sliderSmoothing.addEventListener('input', () => { updateRenderParamsDisplay(); triggerAutoRender(150); });
     if (sliderObsDist) {
@@ -699,37 +813,104 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Переключение режимов предпросмотра (Адаптивный / Во весь экран)
-    const btnModeAdaptive = document.getElementById('btn-mode-adaptive');
-    const btnModeFixed = document.getElementById('btn-mode-fixed');
-    const workbench = document.querySelector('.workbench');
-
-    if (btnModeAdaptive && btnModeFixed && workbench) {
-        btnModeAdaptive.addEventListener('click', () => {
-            btnModeAdaptive.classList.add('active');
-            btnModeFixed.classList.remove('active');
-            workbench.classList.remove('mode-fullscreen-fixed');
+    let activeAlgo = 'stereolab';
+    const btnAlgoStereoLab = document.getElementById('btn-algo-stereolab');
+    const btnAlgoSteer = document.getElementById('btn-algo-steer');
+    if (btnAlgoStereoLab && btnAlgoSteer) {
+        btnAlgoStereoLab.addEventListener('click', () => {
+            activeAlgo = 'stereolab';
+            btnAlgoStereoLab.classList.add('active');
+            btnAlgoSteer.classList.remove('active');
             triggerAutoRender(0);
         });
-
-        btnModeFixed.addEventListener('click', () => {
-            btnModeFixed.classList.add('active');
-            btnModeAdaptive.classList.remove('active');
-            workbench.classList.add('mode-fullscreen-fixed');
+        btnAlgoSteer.addEventListener('click', () => {
+            activeAlgo = 'steer';
+            btnAlgoSteer.classList.add('active');
+            btnAlgoStereoLab.classList.remove('active');
             triggerAutoRender(0);
         });
     }
+
+    const chkUseYShift = document.getElementById('chk-use-yshift');
+    if (chkUseYShift) {
+        chkUseYShift.addEventListener('change', () => {
+            triggerAutoRender(0);
+        });
+    }
+
+    const chkUseRetouch = document.getElementById('chk-use-retouch');
+    if (chkUseRetouch) {
+        chkUseRetouch.addEventListener('change', () => {
+            triggerAutoRender(0);
+        });
+    }
+
+    // Режим полос (Адаптивная / Весь экран)
+
+    const updateStripesModeUI = () => {
+        if (stripesMode === 'adaptive') {
+            if (btnStripesAdaptive) btnStripesAdaptive.classList.add('active');
+            if (btnStripesFixed) btnStripesFixed.classList.remove('active');
+            if (controlEyeSep) controlEyeSep.classList.remove('hidden');
+            if (controlStripesCount) controlStripesCount.classList.add('hidden');
+        } else {
+            if (btnStripesFixed) btnStripesFixed.classList.add('active');
+            if (btnStripesAdaptive) btnStripesAdaptive.classList.remove('active');
+            if (controlEyeSep) controlEyeSep.classList.add('hidden');
+            if (controlStripesCount) controlStripesCount.classList.remove('hidden');
+        }
+    };
+
+    if (btnStripesAdaptive && btnStripesFixed) {
+        btnStripesAdaptive.addEventListener('click', () => {
+            stripesMode = 'adaptive';
+            updateStripesModeUI();
+            updateRenderParamsDisplay();
+            triggerAutoRender(0);
+        });
+
+        btnStripesFixed.addEventListener('click', () => {
+            stripesMode = 'fixed';
+            updateStripesModeUI();
+            updateRenderParamsDisplay();
+            triggerAutoRender(0);
+        });
+    }
+
+    if (sliderStripesCount) {
+        sliderStripesCount.addEventListener('input', () => {
+            stripesCount = parseInt(sliderStripesCount.value);
+            if (valStripesCount) valStripesCount.textContent = stripesCount;
+            updateRenderParamsDisplay();
+            triggerAutoRender(150);
+        });
+        sliderStripesCount.addEventListener('change', () => triggerAutoRender(0));
+    }
+
+    // Кэш для процедурных и загруженных текстур
+    let patternCache = {
+        key: null,
+        canvas: null
+    };
 
     // Хелпер для получения текстуры/паттерна
     function getPatternCanvas(w, h) {
         const texSource = selectTextureSource.value;
         const isProcedural = texSource !== 'upload';
 
-        // Вычисляем ширину полосы повторения (eyeSep) для текущего разрешения на основе миллиметров
-        const physicalWidth = aspectRatio === 'landscape' ? 297 : 210;
-        const scale = w / physicalWidth;
-        const eyeSepPixels = Math.round(parseFloat(sliderEyeSep.value) * scale);
+        // Вычисляем ширину полосы повторения (eyeSep) для текущего разрешения
+        const eyeSepPixels = getEyeSepPixels(w);
         const patternW = isProcedural ? eyeSepPixels : w;
+
+        const sliderFog = document.getElementById('slider-fog-density');
+        const fogDensity = sliderFog ? parseFloat(sliderFog.value) : 30;
+
+        // Создаем ключ кэша на основе всех параметров текстуры
+        const cacheKey = `${selectedType}_${texSource}_${patternW}_${w}_${h}_${fogDensity}_${uploadedTextureImg ? uploadedTextureImg.src : 'none'}`;
+
+        if (patternCache.key === cacheKey && patternCache.canvas) {
+            return patternCache.canvas;
+        }
 
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = patternW;
@@ -760,6 +941,8 @@ document.addEventListener('DOMContentLoaded', () => {
             tempCtx.fillRect(Math.floor(patternW / 2) - 2, 0, 4, h);
         }
 
+        patternCache.key = cacheKey;
+        patternCache.canvas = tempCanvas;
         return tempCanvas;
     }
 
@@ -1190,19 +1373,30 @@ document.addEventListener('DOMContentLoaded', () => {
             rawDepthElement = tempCanvasDepth;
         }
 
-        // Применяем неразрушающее сглаживание (Geometry Blur)
-        const geometryBlur = parseInt(sliderGeometryBlur.value);
+        // Применяем неразрушающее сглаживание (Geometry Blur), масштабируя его относительно ширины холста (базовая ширина 1200px)
+        const rawBlur = parseFloat(sliderGeometryBlur.value);
+        const scaledBlur = rawBlur * (w / 1200);
         let depthSourceElement = null;
-        if (geometryBlur > 0) {
+        if (scaledBlur > 0) {
             const blurCanvas = document.createElement('canvas');
             blurCanvas.width = w;
             blurCanvas.height = h;
             const blurCtx = blurCanvas.getContext('2d');
-            blurCtx.filter = `blur(${geometryBlur}px)`;
+            blurCtx.filter = `blur(${scaledBlur}px)`;
             blurCtx.drawImage(rawDepthElement, 0, 0, w, h);
             depthSourceElement = blurCanvas;
         } else {
-            depthSourceElement = rawDepthElement;
+            // Если размытия нет, нам все равно нужно убедиться, что для WebGL/2D текстура имеет правильный размер w x h
+            if (rawDepthElement.width !== w || rawDepthElement.height !== h) {
+                const scaleCanvas = document.createElement('canvas');
+                scaleCanvas.width = w;
+                scaleCanvas.height = h;
+                const scaleCtx = scaleCanvas.getContext('2d');
+                scaleCtx.drawImage(rawDepthElement, 0, 0, w, h);
+                depthSourceElement = scaleCanvas;
+            } else {
+                depthSourceElement = rawDepthElement;
+            }
         }
 
         // 1. Если это интерактивный превью и WebGL доступен — рендерим на GPU!
@@ -1217,7 +1411,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let patternSourceElement = null;
             const physicalWidth = aspectRatio === 'landscape' ? 297 : 210;
             const scale = w / physicalWidth;
-            const eyeSepPixels = Math.round(parseFloat(sliderEyeSep.value) * scale);
+            const eyeSepPixels = getEyeSepPixels(w);
 
             if (selectedType === 'mts') {
                 patternSourceElement = getPatternCanvas(w, h);
@@ -1251,6 +1445,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Вычисляем макс. сдвиг в пикселях пропорционально физической глубине в мм
             const pixelShift = Math.round(parseFloat(sliderMaxDepth.value) * scale);
             const useHSR = chkUseHSR ? chkUseHSR.checked : true;
+            const useYShift = chkUseYShift ? chkUseYShift.checked : true;
+            const yShift = Math.max(1, Math.round((w / (physicalWidth / 25.4)) / 16));
 
             // 1.3 Передаем текстуры в WebGL и рендерим
             if (depthSourceElement && patternSourceElement) {
@@ -1262,7 +1458,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         maxDepth: pixelShift,
                         viewMode: viewMode,
                         mainStripeMode: mainStripeMode,
-                        useHSR: useHSR
+                        useHSR: useHSR,
+                        algorithm: activeAlgo,
+                        useYShift: useYShift, // Используем реальное значение чекбокса
+                        yShift: yShift
                     });
                 } catch (glError) {
                     console.error("Ошибка WebGL рендеринга, переключение на CPU:", glError);
@@ -1300,9 +1499,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const physicalWidth = aspectRatio === 'landscape' ? 297 : 210;
         const scale = w / physicalWidth;
-        const eyeSepVal = Math.round(parseFloat(sliderEyeSep.value) * scale);
+        const eyeSepVal = getEyeSepPixels(w);
         const pixelShift = Math.round(parseFloat(sliderMaxDepth.value) * scale);
         const useHSR = chkUseHSR ? chkUseHSR.checked : true;
+        const useYShift = chkUseYShift ? chkUseYShift.checked : true;
+        const useRetouch = chkUseRetouch ? chkUseRetouch.checked : true;
+        const yShift = Math.max(1, Math.round((w / (physicalWidth / 25.4)) / 16));
 
         const renderOpts = {
             width: w,
@@ -1318,7 +1520,11 @@ document.addEventListener('DOMContentLoaded', () => {
             distanceToEyes: sliderObsDist ? parseInt(sliderObsDist.value) / 100 : 0.5,
             distanceBetweenEyes: sliderPhysicalEyeSep ? parseInt(sliderPhysicalEyeSep.value) / 1000 : 0.065,
             mainStripeMode: mainStripeMode,
-            useHSR: useHSR
+            useHSR: useHSR,
+            algorithm: activeAlgo,
+            useYShift: useYShift,
+            yShift: yShift,
+            useRetouch: useRetouch
         };
 
         const resultPixels = StereoCore.generate(renderOpts);
@@ -1339,215 +1545,35 @@ document.addEventListener('DOMContentLoaded', () => {
         btnDownload.disabled = false;
     }
 
-    // Сохранение изображения (Экспорт в А4)
+    // Сохранение изображения (Экспорт)
     btnDownload.addEventListener('click', () => {
-        const selectPrintDpi = document.getElementById('select-print-dpi');
-        const printDPI = selectPrintDpi ? parseInt(selectPrintDpi.value) : 171;
-        let exportW = 2000;
-        let exportH = 1414;
-        
-        if (aspectRatio === 'portrait') {
-            if (printDPI === 300) {
-                exportW = 2480;
-                exportH = 3508;
-            } else {
-                exportW = 1414;
-                exportH = 2000;
+        console.log('Download clicked, active canvas:', getActive3DCanvas() ? getActive3DCanvas().id : 'none');
+        try {
+            const activeCanvas = getActive3DCanvas();
+            if (!activeCanvas) {
+                alert("Ошибка: нет активного холста для сохранения.");
+                return;
             }
-        } else {
-            if (printDPI === 300) {
-                exportW = 3508;
-                exportH = 2480;
-            } else {
-                exportW = 2000;
-                exportH = 1414;
-            }
-        }
-
-        const activeCanvas = canvasOutputWebGL.classList.contains('active-stereo') ? canvasOutputWebGL : canvasOutput;
-        const isWebGL = activeCanvas === canvasOutputWebGL;
-
-        // Создаем временный 2D холст для экспорта
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = exportW;
-        tempCanvas.height = exportH;
-        const tempCtx = tempCanvas.getContext('2d');
-
-        if (isWebGL && webglRenderer) {
-            // Сохраняем текущие размеры превью WebGL холста
-            const prevW = canvasOutputWebGL.width;
-            const prevH = canvasOutputWebGL.height;
-
-            // Временно увеличиваем разрешение WebGL холста до HD
-            canvasOutputWebGL.width = exportW;
-            canvasOutputWebGL.height = exportH;
-
-            // Подготавливаем HD карту глубины
-            const offDepthCanvas = document.createElement('canvas');
-            offDepthCanvas.width = exportW;
-            offDepthCanvas.height = exportH;
-            const offDepthCtx = offDepthCanvas.getContext('2d');
             
-            // Сглаживание геометрии (Geometry Blur) для HD
-            const geometryBlur = parseInt(sliderGeometryBlur.value);
-            let rawDepthElement = null;
-            const depthSource = selectDepthSource.value;
+            const w = activeCanvas.width;
+            const h = activeCanvas.height;
 
-            if (depthSource === 'editor') {
-                rawDepthElement = depthEditor.canvas;
-            } else {
-                const tempCanvasDepth = document.createElement('canvas');
-                tempCanvasDepth.width = exportW;
-                tempCanvasDepth.height = exportH;
-                const tempEditor = new DepthEditor(tempCanvasDepth);
-                
-                if (depthSource === 'upload' && uploadedDepthImg && uploadedDepthImg.width > 0 && uploadedDepthImg.height > 0) {
-                    tempEditor.ctx.drawImage(uploadedDepthImg, 0, 0, exportW, exportH);
-                } else if (depthSource === 'preset-pyramid') {
-                    tempEditor.drawPresetShape('pyramid', 255);
-                } else if (depthSource === 'preset-sphere') {
-                    tempEditor.drawPresetShape('sphere', 255);
-                } else if (depthSource === 'preset-text') {
-                    tempEditor.textString = "STEREO";
-                    tempEditor.textSize = Math.round(exportW * 0.125);
-                    tempEditor.textProfile = "beveled";
-                    tempEditor.add3DText();
-                }
-                rawDepthElement = tempCanvasDepth;
-            }
-
-            if (geometryBlur > 0) {
-                const scaledBlur = Math.round(geometryBlur * (exportW / 1200));
-                offDepthCtx.filter = `blur(${scaledBlur}px)`;
-            }
-            offDepthCtx.drawImage(rawDepthElement, 0, 0, exportW, exportH);
-
-            // Подготавливаем HD паттерн
-            const patternSourceElement = getPatternCanvas(exportW, exportH);
-            const physicalWidth = aspectRatio === 'landscape' ? 297 : 210;
-            const exportScale = exportW / physicalWidth;
-            const eyeSepPixels = Math.round(parseFloat(sliderEyeSep.value) * exportScale);
-            const hdMaxDepth = Math.round(parseFloat(sliderMaxDepth.value) * exportScale);
-            const useHSR = chkUseHSR ? chkUseHSR.checked : true;
-
-            // Рендерим HD кадр в WebGL
-            webglRenderer.updateDepthTexture(offDepthCanvas);
-            webglRenderer.updatePatternTexture(patternSourceElement);
-            webglRenderer.render({
-                eyeSep: eyeSepPixels,
-                maxDepth: hdMaxDepth,
-                viewMode: viewMode,
-                mainStripeMode: mainStripeMode,
-                useHSR: useHSR
-            });
-
-            // Копируем результат на временный 2D холст
-            tempCtx.drawImage(canvasOutputWebGL, 0, 0);
-
-            // Восстанавливаем разрешение WebGL холста обратно для превью
-            canvasOutputWebGL.width = prevW;
-            canvasOutputWebGL.height = prevH;
-
-            // Перерисовываем превью
-            generateAndDraw(true);
-        } else {
-            // Медленный CPU рендер для HD
-            const offDepthCanvas = document.createElement('canvas');
-            offDepthCanvas.width = exportW;
-            offDepthCanvas.height = exportH;
-            const offDepthCtx = offDepthCanvas.getContext('2d');
-            
-            const geometryBlur = parseInt(sliderGeometryBlur.value);
-            let rawDepthElement = null;
-            const depthSource = selectDepthSource.value;
-
-            if (depthSource === 'editor') {
-                rawDepthElement = depthEditor.canvas;
-            } else {
-                const tempCanvasDepth = document.createElement('canvas');
-                tempCanvasDepth.width = exportW;
-                tempCanvasDepth.height = exportH;
-                const tempEditor = new DepthEditor(tempCanvasDepth);
-                
-                if (depthSource === 'upload' && uploadedDepthImg && uploadedDepthImg.width > 0 && uploadedDepthImg.height > 0) {
-                    tempEditor.ctx.drawImage(uploadedDepthImg, 0, 0, exportW, exportH);
-                } else if (depthSource === 'preset-pyramid') {
-                    tempEditor.drawPresetShape('pyramid', 255);
-                } else if (depthSource === 'preset-sphere') {
-                    tempEditor.drawPresetShape('sphere', 255);
-                } else if (depthSource === 'preset-text') {
-                    tempEditor.textString = "STEREO";
-                    tempEditor.textSize = Math.round(exportW * 0.125);
-                    tempEditor.textProfile = "beveled";
-                    tempEditor.add3DText();
-                }
-                rawDepthElement = tempCanvasDepth;
-            }
-
-            if (geometryBlur > 0) {
-                const scaledBlur = Math.round(geometryBlur * (exportW / 1200));
-                offDepthCtx.filter = `blur(${scaledBlur}px)`;
-            }
-            offDepthCtx.drawImage(rawDepthElement, 0, 0, exportW, exportH);
-
-            const depthImgData = offDepthCtx.getImageData(0, 0, exportW, exportH);
-            const depthDataArray = depthImgData.data;
-            const depthMap = [];
-            for (let y = 0; y < exportH; y++) {
-                const row = new Uint8Array(exportW);
-                for (let x = 0; x < exportW; x++) {
-                    const idx = (y * exportW + x) * 4;
-                    row[x] = depthDataArray[idx];
-                }
-                depthMap.push(row);
-            }
-
-            const filteredPattern = getPatternCanvas(exportW, exportH);
-            const textureData = filteredPattern.getContext('2d').getImageData(0, 0, filteredPattern.width, filteredPattern.height);
-
-            const physicalWidth = aspectRatio === 'landscape' ? 297 : 210;
-            const exportScale = exportW / physicalWidth;
-            const hdEyeSep = Math.round(parseFloat(sliderEyeSep.value) * exportScale);
-            const hdMaxDepth = Math.round(parseFloat(sliderMaxDepth.value) * exportScale);
-            const useHSR = chkUseHSR ? chkUseHSR.checked : true;
-
-            const highResOpts = {
-                width: exportW,
-                height: exportH,
-                depthData: depthMap,
-                type: selectedType,
-                eyeSep: hdEyeSep,
-                maxDepth: hdMaxDepth,
-                smoothing: parseInt(sliderSmoothing.value),
-                viewMode: viewMode,
-                textureData: textureData,
-                subpixels: parseInt(sliderSmoothing.value) > 0 ? 3 : 1,
-                distanceToEyes: sliderObsDist ? parseInt(sliderObsDist.value) / 100 : 0.5,
-                distanceBetweenEyes: sliderPhysicalEyeSep ? parseInt(sliderPhysicalEyeSep.value) / 1000 : 0.065,
-                mainStripeMode: mainStripeMode,
-                useHSR: useHSR
-            };
-
-            const highResPixels = StereoCore.generate(highResOpts);
-            const dlImgData = tempCtx.createImageData(exportW, exportH);
-            dlImgData.data.set(highResPixels);
-            tempCtx.putImageData(dlImgData, 0, 0);
+            const link = document.createElement('a');
+            link.download = `stereogram_${w}x${h}_${Date.now()}.png`;
+            link.href = activeCanvas.toDataURL('image/png');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (err) {
+            console.error("Ошибка при экспорте:", err);
+            alert("Произошла ошибка при экспорте стереограммы.");
         }
-
-        // Опорные точки при сохранении более не добавляются (изображение чистое)
-
-        const link = document.createElement('a');
-        link.download = `stereogram_${exportW}x${exportH}_${Date.now()}.png`;
-        link.href = tempCanvas.toDataURL('image/png');
-        link.click();
     });
 
     // Инициализация превью при загрузке
     updateTextureUploadVisibility();
     updateDepthUploadVisibility();
-    updateInputsPreview();
-    // Первая автогенерация
-    triggerAutoRender(150);
+    syncCanvasResolution(true);
 
     // -------------------------------------------------------------
     // 5. ИНИЦИАЛИЗАЦИЯ И УПРАВЛЕНИЕ ДЕКОДЕРОМ
@@ -1719,7 +1745,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const link = document.createElement('a');
             link.download = `decoded_depthmap_${Date.now()}.png`;
             link.href = canvasDecOutput.toDataURL('image/png');
+            document.body.appendChild(link);
             link.click();
+            document.body.removeChild(link);
         });
+    }
+
+    function getActive3DCanvas() {
+        if (canvasOutputWebGL && canvasOutputWebGL.classList.contains('active-stereo') && !canvasOutputWebGL.classList.contains('hidden')) {
+            return canvasOutputWebGL;
+        }
+        return canvasOutput;
     }
 });

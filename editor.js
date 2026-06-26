@@ -38,6 +38,13 @@ class DepthEditor {
         this.textLineSpacing = 1.2;
         this.textProfile = "beveled"; // 'flat', 'beveled', 'rounded'
         
+        // Новые настройки кисти из Stereogram Paint
+        this.brushShape = 'circle'; // 'circle', 'square', 'diamond'
+        this.brushProfile = 'plane'; // 'plane', 'sphere', 'inset'
+        this.isEraserMode = false;
+        this.depthIncrementEnabled = false;
+        this.depthIncrementValue = 1.0;
+        
         // Инициализация холста
         this.clearCanvas();
         this.saveState(); // Сохраняем исходное пустое состояние
@@ -48,11 +55,17 @@ class DepthEditor {
     initEvents() {
         // События мыши для рисования
         this.canvas.addEventListener('mousedown', (e) => {
-            if (this.currentTool !== 'brush') return;
-            this.isDrawing = true;
             const rect = this.canvas.getBoundingClientRect();
             const x = (e.clientX - rect.left) * (this.canvas.width / rect.width);
             const y = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+            
+            if (this.currentTool === 'eyedropper') {
+                this.sampleDepthAtCoords(x, y);
+                return;
+            }
+            
+            if (this.currentTool !== 'brush') return;
+            this.isDrawing = true;
             this.lastX = x;
             this.lastY = y;
             
@@ -85,13 +98,19 @@ class DepthEditor {
         
         // Поддержка Touch-экранов (мобильные устройства)
         this.canvas.addEventListener('touchstart', (e) => {
-            if (this.currentTool !== 'brush') return;
             e.preventDefault();
-            this.isDrawing = true;
             const rect = this.canvas.getBoundingClientRect();
             const touch = e.touches[0];
             const x = (touch.clientX - rect.left) * (this.canvas.width / rect.width);
             const y = (touch.clientY - rect.top) * (this.canvas.height / rect.height);
+            
+            if (this.currentTool === 'eyedropper') {
+                this.sampleDepthAtCoords(x, y);
+                return;
+            }
+            
+            if (this.currentTool !== 'brush') return;
+            this.isDrawing = true;
             this.lastX = x;
             this.lastY = y;
             this.drawBrushCircle(x, y);
@@ -112,41 +131,135 @@ class DepthEditor {
         this.canvas.addEventListener('touchend', stopDrawing);
     }
     
-    // Рисование одной точки кисти
-    drawBrushCircle(x, y) {
-        const radius = this.brushSize / 2;
-        const color = `rgb(${this.brushHeight}, ${this.brushHeight}, ${this.brushHeight})`;
+    // Считывание высоты рельефа в точке (Пипетка глубины)
+    sampleDepthAtCoords(x, y) {
+        const px = Math.max(0, Math.min(this.canvas.width - 1, Math.floor(x)));
+        const py = Math.max(0, Math.min(this.canvas.height - 1, Math.floor(y)));
+        const imgData = this.ctx.getImageData(px, py, 1, 1);
+        const depthVal = imgData.data[0]; // Ч/Б, берем красный канал
         
-        this.ctx.save();
-        if (this.brushBlur > 0) {
-            // Создаем радиальный градиент для мягкой кисти
-            const grad = this.ctx.createRadialGradient(x, y, radius - this.brushBlur/2, x, y, radius + this.brushBlur/2);
-            grad.addColorStop(0, color);
-            grad.addColorStop(1, `rgba(${this.brushHeight}, ${this.brushHeight}, ${this.brushHeight}, 0)`);
-            this.ctx.fillStyle = grad;
-            
-            this.ctx.beginPath();
-            this.ctx.arc(x, y, radius + this.brushBlur/2, 0, Math.PI * 2);
-            this.ctx.fill();
-        } else {
-            // Жесткая кисть
-            this.ctx.fillStyle = color;
-            this.ctx.beginPath();
-            this.ctx.arc(x, y, radius, 0, Math.PI * 2);
-            this.ctx.fill();
+        this.brushHeight = depthVal;
+        
+        // Синхронизируем слайдер и числовое поле
+        const slider = document.getElementById('slider-brush-height');
+        const valDisp = document.getElementById('val-brush-height');
+        if (slider && valDisp) {
+            slider.value = depthVal;
+            valDisp.textContent = depthVal;
         }
-        this.ctx.restore();
+        
+        // Переключаем обратно на кисть
+        const brushTabBtn = document.getElementById('btn-tool-brush');
+        if (brushTabBtn) {
+            brushTabBtn.click();
+        }
     }
     
-    // Рисование непрерывной линии (интерполяция шагов)
+    // Рисование одной точки кисти с поддержкой форм, профилей, ластика и размытия
+    drawBrushCircle(x, y) {
+        const R = this.brushSize / 2;
+        const startX = Math.max(0, Math.floor(x - R));
+        const startY = Math.max(0, Math.floor(y - R));
+        const endX = Math.min(this.canvas.width, Math.ceil(x + R));
+        const endY = Math.min(this.canvas.height, Math.ceil(y + R));
+        
+        const w = endX - startX;
+        const h = endY - startY;
+        if (w <= 0 || h <= 0) return;
+        
+        const imgData = this.ctx.getImageData(startX, startY, w, h);
+        const data = imgData.data;
+        
+        const brushH = this.brushHeight;
+        const shape = this.brushShape || 'circle';
+        const profile = this.brushProfile || 'plane';
+        const isEraser = this.isEraserMode;
+        
+        for (let py = startY; py < endY; py++) {
+            const dy = py - y;
+            const rowOffset = (py - startY) * w;
+            
+            for (let px = startX; px < endX; px++) {
+                const dx = px - x;
+                const idx = (rowOffset + (px - startX)) * 4;
+                
+                let d = 0;
+                let inside = false;
+                
+                if (shape === 'circle') {
+                    d = Math.hypot(dx, dy);
+                    inside = (d <= R);
+                } else if (shape === 'square') {
+                    d = Math.max(Math.abs(dx), Math.abs(dy));
+                    inside = (d <= R);
+                } else if (shape === 'diamond') {
+                    d = Math.abs(dx) + Math.abs(dy);
+                    inside = (d <= R);
+                }
+                
+                if (inside) {
+                    let f = 1;
+                    if (profile === 'sphere') {
+                        f = Math.sqrt(1 - Math.pow(d / R, 2));
+                    } else if (profile === 'inset') {
+                        f = 1 - (d / R);
+                    }
+                    
+                    // Применяем мягкость краев (Blur/Softness)
+                    if (this.brushBlur > 0) {
+                        const blurWidth = Math.min(R, this.brushBlur);
+                        const blurStart = R - blurWidth;
+                        if (d > blurStart) {
+                            const t = (d - blurStart) / blurWidth;
+                            f = f * (1 - t);
+                        }
+                    }
+                    
+                    f = Math.max(0, Math.min(1, f));
+                    const targetVal = Math.round(brushH * f);
+                    
+                    if (isEraser) {
+                        // Ластик стирает рельеф в 0
+                        data[idx] = 0;
+                        data[idx+1] = 0;
+                        data[idx+2] = 0;
+                    } else {
+                        // Выдавливание: берем максимум, чтобы не затирать более высокие точки
+                        const currentVal = data[idx];
+                        const val = Math.max(currentVal, targetVal);
+                        data[idx] = val;
+                        data[idx+1] = val;
+                        data[idx+2] = val;
+                    }
+                    data[idx+3] = 255;
+                }
+            }
+        }
+        this.ctx.putImageData(imgData, startX, startY);
+    }
+    
+    // Рисование непрерывной линии (интерполяция шагов) с инкрементом высоты
     drawBrushLine(x0, y0, x1, y1) {
         const dist = Math.hypot(x1 - x0, y1 - y0);
-        // Рисуем круги каждые 2 пикселя для непрерывности
         const steps = Math.ceil(dist / 2);
         for (let i = 0; i <= steps; i++) {
             const t = steps === 0 ? 0 : i / steps;
             const cx = x0 + (x1 - x0) * t;
             const cy = y0 + (y1 - y0) * t;
+            
+            if (this.depthIncrementEnabled && this.depthIncrementValue !== 0) {
+                // Плавное нарастание высоты по ходу движения
+                this.brushHeight = Math.max(0, Math.min(255, this.brushHeight + this.depthIncrementValue));
+                
+                // Синхронизируем значение слайдера в интерфейсе
+                const slider = document.getElementById('slider-brush-height');
+                const valDisp = document.getElementById('val-brush-height');
+                if (slider && valDisp) {
+                    slider.value = Math.round(this.brushHeight);
+                    valDisp.textContent = Math.round(this.brushHeight);
+                }
+            }
+            
             this.drawBrushCircle(cx, cy);
         }
     }

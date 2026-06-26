@@ -45,18 +45,18 @@ class WebGLStereoRenderer {
             uniform float uPixelSize;
             uniform float uMainStripeMode;
             uniform float uUseHSR;
+            uniform float uUseYShift;
+            uniform float uYShift;
 
             void main() {
                 float x = vUv.x;
                 float y = vUv.y;
-                
+                float origX = vUv.x;
                 float stripeWidth = uEyeSep;
-                float stripeLeft = uMainStripeMode > 0.5 ? (0.5 - stripeWidth * 0.5) : 0.0;
-                float stripeRight = uMainStripeMode > 0.5 ? (0.5 + stripeWidth * 0.5) : stripeWidth;
                 
-                // Алгоритм распространения сдвигов по строке с HSR
-                for (int i = 0; i < 30; i++) {
-                    if (x < stripeLeft) {
+                // Propagate from right to left across the entire screen
+                for (int i = 0; i < 40; i++) {
+                    if (x >= 0.0) {
                         float lookupX = clamp(x, 0.0, 1.0);
                         vec4 depthCol = texture2D(uDepthTexture, vec2(lookupX, y));
                         float d = dot(depthCol.rgb, vec3(0.299, 0.587, 0.114));
@@ -65,54 +65,6 @@ class WebGLStereoRenderer {
                         }
                         float sep = uEyeSep - d * uMaxDepth;
                         
-                        // Occlusion check
-                        bool occluded = false;
-                        if (uUseHSR > 0.5) {
-                            float minSep = uEyeSep - uMaxDepth;
-                            float tStart = minSep;
-                            float tEnd = sep;
-                            if (tStart < tEnd) {
-                                float searchW = tEnd - tStart;
-                                for (int j = 1; j < 50; j++) {
-                                    float offset = float(j) * uPixelSize;
-                                    if (offset >= searchW) break;
-                                    float t_coord = x + tStart + offset;
-                                    vec4 dCol_t = texture2D(uDepthTexture, vec2(clamp(t_coord, 0.0, 1.0), y));
-                                    float d_t = dot(dCol_t.rgb, vec3(0.299, 0.587, 0.114));
-                                    if (uInvertDepth > 0.5) {
-                                        d_t = 1.0 - d_t;
-                                    }
-                                    float sep_t = uEyeSep - d_t * uMaxDepth;
-                                    if (t_coord - sep_t > x) {
-                                        occluded = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if (occluded) {
-                            x += uEyeSep;
-                            continue;
-                        }
-                        x += sep;
-                    } else if (x >= stripeRight) {
-                        // 1-step corrector to sample depth at left endpoint x - sep
-                        float d_approx = dot(texture2D(uDepthTexture, vec2(clamp(x - uEyeSep, 0.0, 1.0), y)).rgb, vec3(0.299, 0.587, 0.114));
-                        if (uInvertDepth > 0.5) {
-                            d_approx = 1.0 - d_approx;
-                        }
-                        float sep_approx = uEyeSep - d_approx * uMaxDepth;
-                        float leftX = clamp(x - sep_approx, 0.0, 1.0);
-                        
-                        vec4 depthCol = texture2D(uDepthTexture, vec2(leftX, y));
-                        float d = dot(depthCol.rgb, vec3(0.299, 0.587, 0.114));
-                        if (uInvertDepth > 0.5) {
-                            d = 1.0 - d;
-                        }
-                        float sep = uEyeSep - d * uMaxDepth;
-                        
-                        // Occlusion check
                         bool occluded = false;
                         if (uUseHSR > 0.5) {
                             float minSep = uEyeSep - uMaxDepth;
@@ -140,18 +92,23 @@ class WebGLStereoRenderer {
                         
                         if (occluded) {
                             x -= uEyeSep;
-                            continue;
+                        } else {
+                            x -= sep;
                         }
-                        x -= sep;
                     } else {
                         break;
                     }
                 }
                 
-                float patternX = (x - stripeLeft) / stripeWidth;
+                // Align pattern coordinates with the selected base stripe mode
+                float patternOffset = uMainStripeMode > 0.5 ? (0.5 - stripeWidth * 0.5) : 0.0;
+                float patternX = (x - patternOffset) / stripeWidth;
                 patternX = fract(patternX);
                 
-                gl_FragColor = texture2D(uPatternTexture, vec2(patternX, fract(y)));
+                float repeatIndex = floor((origX - patternOffset) / stripeWidth);
+                float patternY = y + repeatIndex * uYShift * uUseYShift;
+                
+                gl_FragColor = texture2D(uPatternTexture, vec2(patternX, fract(patternY)));
             }
         `;
 
@@ -167,7 +124,9 @@ class WebGLStereoRenderer {
             uInvertDepth: gl.getUniformLocation(this.program, 'uInvertDepth'),
             uPixelSize: gl.getUniformLocation(this.program, 'uPixelSize'),
             uMainStripeMode: gl.getUniformLocation(this.program, 'uMainStripeMode'),
-            uUseHSR: gl.getUniformLocation(this.program, 'uUseHSR')
+            uUseHSR: gl.getUniformLocation(this.program, 'uUseHSR'),
+            uUseYShift: gl.getUniformLocation(this.program, 'uUseYShift'),
+            uYShift: gl.getUniformLocation(this.program, 'uYShift')
         };
     }
 
@@ -287,6 +246,11 @@ class WebGLStereoRenderer {
         
         const hsrVal = opts.useHSR ? 1.0 : 0.0;
         gl.uniform1f(this.locations.uUseHSR, hsrVal);
+
+        const useYShiftVal = opts.useYShift ? 1.0 : 0.0;
+        const normYShift = opts.yShift / this.canvas.height;
+        gl.uniform1f(this.locations.uUseYShift, useYShiftVal);
+        gl.uniform1f(this.locations.uYShift, normYShift);
 
         // Привязываем текстурные юниты и текстуры
         gl.activeTexture(gl.TEXTURE0);
